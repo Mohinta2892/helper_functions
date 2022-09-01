@@ -1,0 +1,442 @@
+PROGRAM local_shape_descriptors
+"""
+Notation:
+:= assignment
+= equals
+# comment
+docstring:: documentation
+
+"""
+define method input_img_seg:
+    # NB: You may use a different name for this method
+    INPUTS:
+        raw = a 2D/3D array (numpy.array of int)
+        labels = a segmentation of the raw (numpy.array of int)
+
+    CALL: get_descriptors(segmentation,
+                          sigma,
+                          voxel_size:=None,
+                          roi:=None,
+                          labels:=None,
+                          mode:='gaussian',
+                          downsample:=1
+                          )
+
+
+define method get_descriptors:
+    """ Calculates all descriptors per voxel of each individual label and stores them
+    as an ndarray of shape (channels, d, h, w) or (channels, h, w) """
+
+    INPUTS:
+         segmentation=labels
+
+        sigma = a tuple of float (len 2/3)
+            docstring:: To define the radius of the gaussian/sphere
+
+        voxel_size = a tuple of int, optional
+
+        roi = an array like [:, 0:250, 0:250],  optional
+            docstring::
+            A subregion of interest
+            Roi is currently a gunpowder object, with attributes roi_offset (start location)
+            and roi_shape (end location).
+
+        labels = array of int;  optional
+            docstring::
+            Restricts the computation of descriptors to given labels,
+            defaults to all labels inside the roi of the segmentation
+
+        mode = string; optional
+            docstring::
+            Either "gaussian" or "sphere". Determines over what region
+            the local shape descriptor is computed. For "gaussian", a
+            Gaussian with the given "sigma" is used, and statistics are
+            averaged with corresponding weights. For "sphere", a sphere
+            with radius "sigma" is used. Defaults to "gaussian".
+
+        downsample = int; optional
+            docstring::
+            Compute the local shape descriptor on a downsampled volume for
+            faster processing. Defaults to 1 (no downsampling).
+
+    VARIABLE dims = Int, Length of shape of segmentation array
+    # dims = len(segmentation.shape)
+
+    IF voxel_size is None:
+        voxel_size := (1,1) for 2D or (1,1,1) for 3D input
+        # voxel_size = (1, ) * dims
+    ELSE:
+        voxel_size := CAST input voxel_size to a tuple
+        # voxel_size = tuple(voxel_size)
+
+    IF roi is None:
+        roi := ((0,) * dims, segmentation.shape)
+        # roi = np.array((0,0), (250,250)) for 2D OR  np.array((0,0,0), (250,250, 250)) for 3D
+
+    VARIABLE roi_slices = convert roi to slice objects
+    # roi_slices = (slice(0, 250, None), slice(0, 250, None))
+
+
+    # this gives us unique values of integers within the segmentation array cut off by the roi
+    IF labels is None:
+        labels = Unique labels in the roi sliced from the segmentation
+        # labels = np.unique(segmentation[roi_slices])
+
+    IF dims = 2:
+        sigma := sigma[0:2]
+        channels := 6 # 2D has 6 descriptors only
+
+    ELSE:
+        channels := 10 # 4 more descriptors added pertaining to the z-axis
+
+    # prepare full-res descriptor volumes for roi
+    descriptors := np.zeros(
+                (channels,) + roi.get_shape(),
+                dtype=np.float32)
+
+    # get sub-sampled shape, roi, voxel size and sigma
+    df := downsample
+    sub_shape := tuple(s/df for s in segmentation.shape)
+    sub_roi := roi/df
+
+    SET a check such that: Segmentation shape is a multiple of downsampling factor
+    # sub_roi*df == roi
+
+    sub_voxel_size := tuple(v*df for v in voxel_size)
+    sub_sigma_voxel := tuple(s/v for s, v in zip(sigma, sub_voxel_size))
+
+    print Downsampled shape
+    print Downsampled voxel size
+    print Downsampled sigma
+
+    # prepare coordinates volume (reuse if we already have one)
+    coords_dict := {}
+
+
+    IF (sub_shape, sub_voxel_size) not in coords_dict:
+
+       print "Create meshgrid..."
+
+       GENERATE A 3D OR 2D MESHGRID with numpy.meshgrid()
+       IF dims = 3:
+            VARIABLE grid := np.meshgrid(
+                np.arange(0, sub_shape[0]*sub_voxel_size[0], sub_voxel_size[0]),
+                np.arange(0, sub_shape[1]*sub_voxel_size[1], sub_voxel_size[1]),
+                np.arange(0, sub_shape[2]*sub_voxel_size[2], sub_voxel_size[2]),
+                indexing='ij')
+
+       ELSE:
+            VARIABLE grid := np.meshgrid(
+                    np.arange(0, sub_shape[0]*sub_voxel_size[0], sub_voxel_size[0]),
+                    np.arange(0, sub_shape[1]*sub_voxel_size[1], sub_voxel_size[1]),
+                    indexing='ij')
+
+        coords_dict[(sub_shape, sub_voxel_size)] := np.array(grid, dtype=np.float32)
+
+    # This is all x-y combinations of coordinates in a rectangle generated via meshgrid.
+    # IS an ndarray like [2, 250, 250], where 2 channels pertain to axis x and y
+    coords := coords_dict[(sub_shape, sub_voxel_size)]
+
+    LOOP over all labels:
+        IF the label is 0:
+            Continue the loop
+
+
+        VARIABLE mask = A 32 bit float array-like segmentation, where segmentation is equal to label
+        # mask = (segmentation==label).astype(np.float32)
+
+        SLICE the mask with given downsample value used as step
+        # sub_mask = mask[::df, ::df, ::df] OR sub_mask = mask[::df, ::df]
+
+        CALL and set variables:
+        sub_count, sub_mean_offset, sub_variance, sub_pearson := get_stats(coords,
+                                                                            sub_mask,
+                                                                            sigma,
+                                                                            sub_sigma_voxel,
+                                                                            sub_roi,
+                                                                            mode='gaussian')
+
+        CONCATENATE all descriptors along the channel axis for shape (6, h, w) or (10, d, h, w)
+        VARIABLE sub_descriptor := np.concatenate([
+                sub_mean_offset,
+                sub_variance,
+                sub_pearson,
+                sub_count[None,:]])
+
+        # Upsample sub_descriptor to original space
+        CALL and set variable:
+        descriptor := upsample(sub_descriptor, df)
+
+        # accumulate all descriptors per roi-sliced label into the descriptors ndarray
+        descriptors := descriptors + descriptor*mask[roi_slices]
+
+    END LOOP
+
+    # normalize stats of all descriptors
+    # get max possible mean offset for normalization
+    IF mode = 'gaussian':
+        # farthest voxel in context is 3*sigma away, but due to Gaussian
+        # weighting, sigma itself is probably a better upper bound
+        max_distance := np.array(
+            [s for s in sigma],
+            dtype=np.float32)
+    ELSE IF mode = 'sphere':
+        # farthest voxel in context is sigma away, but this is almost
+        # impossible to reach as offset -- let's take half sigma
+        max_distance := np.array(
+            [0.5*s for s in sigma],
+            dtype=np.float32)
+
+
+    IF dims == 3:
+
+        # mean offsets (z,y,x) = [0,1,2]
+        # covariance (zz,yy,xx) = [3,4,5]
+        # pearsons (zy,zx,yx) = [6,7,8]
+        # size = [10]
+
+        # mean offsets in [0, 1]
+        descriptors[[0, 1, 2]]  := descriptors[[0, 1, 2]]/max_distance[:, None, None, None]*0.5 + 0.5
+
+        # pearsons in [0, 1]
+        descriptors[[6, 7, 8]]  :=  descriptors[[6, 7, 8]]*0.5 + 0.5
+
+        # reset background to 0
+        descriptors[[0, 1, 2, 6, 7, 8]]  :=  descriptors[[0, 1, 2, 6, 7, 8]] * (segmentation[roi_slices] != 0)
+
+    ELSE:
+
+        # mean offsets (y,x) = [0,1]
+        # covariance (yy,xx) = [2,3]
+        # pearsons (yx) = [4]
+        # size = [5]
+
+        # mean offsets in [0, 1]
+        descriptors[[0, 1]] := descriptors[[0, 1]]/max_distance[:, None, None]*0.5 + 0.5
+
+        # pearsons in [0, 1]
+        descriptors[[4]] := descriptors[[4]]*0.5 + 0.5
+
+        # reset background to 0
+        descriptors[[0, 1, 4]] = descriptors[[0, 1, 4]] * (segmentation[roi_slices] != 0)
+
+    # clip outliers
+    np.clip(descriptors, 0.0, 1.0, out=descriptors)
+
+    return descriptors
+
+
+define method upsample:
+    """ Reshape any downsampled array to it original shape"""
+
+    INPUTS:
+    array = An ndarray to upsample
+    f = Int, the upsampling factor equal to the downsampling factor used in METHOD get_descriptors()
+
+    # numpy's shape attribute returns a tuple of len(dimensions of input array)
+    VARIABLE shape := array.shape
+
+    # set the byte separation of all items in the array in a tuple,
+    # depending on how they are stored in a contiguous memory block
+    VARIABLE stride := array.strides
+
+    IF len(array.shape) = 4:
+        # set new shape of array as a tuple
+        VARIABLE sh := (shape[0], shape[1], f, shape[2], f, shape[3], f)
+
+        # set new stride of array as tuple
+        st := (stride[0], stride[1], 0, stride[2], 0, stride[3], 0)
+
+    ELSE:
+        sh := (shape[0], shape[1], f, shape[2], f)
+        st := (stride[0], stride[1], 0, stride[2], 0)
+
+    CALL numpy.lib.stride_tricks.as_strided to reshape the array:
+    VARIABLE view := as_strided(array,sh,st)
+
+    # create a list that will be used to reshape the input array
+    VARIABLE l := [shape[0]]
+    [l.append(shape[i+1]*f) for i,j in enumerate(shape[1:])]
+
+    # call numpy's reshape function and return the reshaped array
+    return view.reshape(l)
+
+
+define method aggregate:
+    """ Grows a gaussian or sphere per voxel"""
+
+    INPUTS:
+    array = An ndarray
+    sigma = A tuple of length 3/2 for 3D/2D to be used as radius for the gaussian or sphere
+    mode = String, either 'gaussian' or 'sphere', default is 'gaussian', optional
+    roi = A tuple specifying a region of interest to cut off from the array,  optional
+
+    IF roi is None:
+        roi_slices := (slice(None),)
+    ELSE:
+        roi_slices = a tuple of slice objects
+        #roi_slices = (slice(0, 250, None), slice(0, 250, None))
+
+    # growing the gaussian
+    IF mode = 'gaussian':
+
+       CALL scipy.ndimage.gaussian_filter():
+       return gaussian_filter(
+            array,
+            sigma=sigma,
+            mode='constant',
+            cval=0.0,
+            truncate=3.0)[roi_slices]
+
+
+    ELSE IF mode = 'sphere':
+
+        radius = sigma[0]
+        CHECK if the radius is isotropic across all dimensions of the sphere
+
+        sphere := Make a sphere with the given radius
+        CALL scipy.ndimage.filters.convolve() to convolve the image with sphere:
+        return convolve(
+            array,
+            sphere,
+            mode='constant',
+            cval=0.0)[roi_slices]
+
+    ELSE:
+        raise an exception "Unknown mode, neither gaussian nor sphere"
+
+
+define method outer_product:
+
+    """Computes the unique values of the outer products of the first dimension
+    of ``array``. If ``array`` has shape ``(k, d, h, w)``, for example, the
+    output will be of shape ``(k*(k+1)/2, d, h, w)``.
+    """
+
+    INPUTS:
+    array : An ndarray
+
+    # find the first dimension
+    k := array.shape[0]
+    # this is generating all xx, yy, xy multiplications. Now since yx and xy will be the same,
+    # below we will get rid of duplicates,
+    CALL numpy.einsum for the outer product:
+    outer := np.einsum('i...,j...->ij...', array, array)
+
+    return outer.reshape((k**2,)+array.shape[1:])
+
+
+define method get_stats:
+    """ Calculates the mean-offset(distance from center of mass),
+    covariance(orientation), pearson-coefficient (elongation), voxel count
+    """
+
+    INPUTS:
+    coords = An ndarray
+    mask = An ndarray
+    sigma = A tuple containing sigma's original provided by the user
+    sigma_voxel = A tuple containing sigma's per voxel. after downsampling
+    roi = An array like [:, 0:250, 0:250]
+    mode = String, 'gaussian' or 'sphere', default= 'gaussian', optional
+
+
+    # mask for object - finds the x-y locations which should hold value other than background
+    masked_coords := coords * mask
+
+    # number of inside voxels
+    print "Counting inside voxels..."
+    CALL aggregate:
+    count := aggregate(mask, sigma_voxel, mode=mode, roi=roi)
+
+    # number of dimensions in count
+    count_len := len(count.shape)
+
+    # avoid division by zero
+    count[count==0] := 1
+
+    # Calculate mean/center of mass per voxel
+    print "Computing mean position of inside voxels..."
+
+    # find the sum of neighborhoods
+    mean := np.array([aggregate(masked_coords[d],
+                                 sigma_voxel,
+                                 mode,
+                                 roi=roi)
+                        for d in range(count_len)])
+
+    # find the mean position
+    mean := mean / count
+
+    print "Computing offset of mean position..."
+    # Deduct the coordinates from the mean to find how far voxels are from the mean
+    mean_offset := mean - coords[(slice(None),) + roi.to_slices()]
+
+    # covariance of the direction of vo/pixels based on x,y,z coordinates
+    print "Computing covariance..."
+
+    CALL method outer_product:
+    coords_outer := outer_product(masked_coords)
+
+    # remove duplicate entries in covariance
+    # 3d:
+        # 0 1 2 --> # xx xy xz
+        # 3 4 5 --> # yx yy yz
+        # 6 7 8 --> # zx zy zz
+    # get rid of one xy, xz, zy
+
+    # 2d:
+        # 0 1
+        # 2 3
+
+    # list of axes in the coords_outer ndarray that do not contain duplicates values
+    VARIABLE entries := [0,4,8,1,2,5] if count_len = 3 else [0,3,1]
+
+    # convolve the outer product of the coordinates with a gaussian or sphere, to
+    # find area of overlap per voxel and store as an ndarray
+    covariance := np.array([aggregate(coords_outer[d], sigma_voxel, mode, roi)
+                            for d in entries])
+
+    # potentially creating a mean covariance and then subtracting the covariance of
+    # the mean position to get an offset of covariance from the center of mass
+    covariance := covariance / count
+    covariance := covariance - outer_product(mean)[entries]
+
+    # 3d
+    IF count_len = 3:
+        # variances of z, y, x coordinates
+        variance := covariance[[0, 1, 2]]
+
+        # Pearson coefficients of zy, zx, yx
+        pearson :=  covariance[[3, 4, 5]]
+
+        # normalize Pearson correlation coefficient
+        variance[variance<1e-3] := 1e-3 # numerical stability
+        pearson[0] := pearson[0] / np.sqrt(variance[0]*variance[1])
+        pearson[1] := pearson[1] / np.sqrt(variance[0]*variance[2])
+        pearson[2] := pearson[2] / np.sqrt(variance[1]*variance[2])
+
+        # normalize variances to interval [0, 1]
+        variance[0] := variance[0] / sigma[0]**2
+        variance[1] := variance[1] / sigma[1]**2
+        variance[2] := variance[2] / sigma[2]**2
+
+    # 2d
+    ELSE:
+
+        # variances of y, x coordinates
+        variance := covariance[[0, 1]]
+
+        # Pearson coefficients of yx
+        pearson := covariance[[2]]
+
+        # normalize Pearson correlation coefficient
+        variance[variance<1e-3] = 1e-3 # numerical stability
+        pearson := pearson / np.sqrt(variance[0]*variance[1])
+
+        # normalize variances to interval [0, 1]
+        variance[0] := variance[0] / sigma[0]**2
+        variance[1] := variance[1] / sigma[1]**2
+
+    return count, mean_offset, variance, pearson
+
+END PROGRAM
