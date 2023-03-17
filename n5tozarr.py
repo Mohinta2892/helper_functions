@@ -96,8 +96,8 @@ def to_hdf(z, outfile):
 
 
 def to_zarr(z, outfile):
-    z = dask.array.rechunk(z, outfile)
-
+    # z = dask.array.rechunk(z, outfile)
+    z = dask.array.rechunk(z) # correct format with chunks='auto'
     dask.array.to_zarr(z, outfile, component='volumes/raw', overwrite=True)
     f = zarr.open(outfile, 'a')
     f['volumes/raw'].attrs['offset'] = (0, 0, 0)
