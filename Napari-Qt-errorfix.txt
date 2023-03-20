@@ -1,0 +1,13 @@
+Error:
+
+WARNING: Could not load the Qt platform plugin "xcb" in "" even though it was found.
+15:56:05 WARNING Could not load the Qt platform plugin "xcb" in "" even though it was found.
+WARNING: This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem.
+
+
+Fix (https://github.com/biolab/orange3/issues/5974):
+Running
+sudo apt-get install libxcb-xinerama0
+and then
+sudo apt-get install libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libegl1-mesa
+Solved the problem.
