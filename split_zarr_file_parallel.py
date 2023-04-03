@@ -30,10 +30,28 @@ Notes:
 Matrix shape of octo scale 0 in zyx:(34745, 21471, 20486)
 Matrix shape of octo scale 6 in zyx:(542, 335, 320)
 Ratio changes = 542/34745 = 0.02; 0.02; 0.02
-
+8525, 15128 ,6538: /media/samia/DATA/ark/code-experiments/sub-rois-scale0/octo-s0-subroi_z7840-9408_y14112-15680_x6272-7840.zarr
 Example:
 Patch size per 1568^3 roi is 31^3 in the scale 0 mask
 mask_patch = mask[:31, :31, :31]
+
+# finding positions with only neuropils in octo
+Scale 6 mask bounding box coordinates:
+top left horn: x= 48 (3077) y=80 z=135 --> x= 93 y=80 (5128) z=135 -->185
+x= 48 y=157(10064) z=135 --> x= 93 (5961) y=157 z=135 
+x=3077:5961, y=5128:10064, z=8654:11859
+
+top right horn: x= 221 y=81 (5192) z=135 --> x= 263(16859) y=81 z=135 --> 177 (8654--> 11346)
+x= 48 (3077) y=157 z=135 x= 263 y=157 (10064) z=135 
+x=3077:16859, y=5192:10064, z=8654:11346
+
+MB region:
+x= 71 (4552) y=194 (12436) z=135 (8654) --> x= 201  y=212 z=135 (8654--> 12756)
+x= 71 y=277(17757) z=135 --> x= 211(13526) y=280 z=135 
+x= 4552:13526, y=12436:12436, z=8654:12756
+
+3136-4704: mix of soma (majority) and neuropil
+
 """
 
 in_store = N5FSStore('/media/samia/DATA/mounts/zstore1/FIBSEM_L1120_FullCNS_8x8x8nm')
