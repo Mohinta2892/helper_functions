@@ -229,6 +229,9 @@ def pick_in_paint(viewer):
         if np.sum(in_paint_seg) > 0:
             global cher_pick_f
             cher_pick_f["volumes/labels/neuron_ids"] = in_paint_seg
+            # we set it here since we do not have access to offset and res in `pick_in_paint()`
+            cher_pick_f["volumes/labels/neuron_ids"].attrs["offset"] = (0, 0, 0)  # a hack till we find a better way!!
+            cher_pick_f["volumes/labels/neuron_ids"].attrs["resolution"] = (8, 8, 8)
 
     return None
 
@@ -263,10 +266,6 @@ def pick_somas(filename, ):
 
     cher_pick_f["volumes/labels/mito_ids"].attrs["offset"] = offset
     cher_pick_f["volumes/labels/mito_ids"].attrs["resolution"] = res
-
-    # we set it here since we do not have access to offset and res in `pick_in_paint()`
-    cher_pick_f["volumes/labels/neuron_ids"].attrs["offset"] = offset
-    cher_pick_f["volumes/labels/neuron_ids"].attrs["resolution"] = res
 
     napari.run()
 
