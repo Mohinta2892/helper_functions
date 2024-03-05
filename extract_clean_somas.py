@@ -1,3 +1,4 @@
+#!/home/samia/anaconda3/envs/napari-env/bin/python # delete this or run with python from a conda which has napari installed
 """
 NB: Ensure you have a good processor and enough RAM because we use `NAPARI`, which loads everything into RAM.
 This script has not been rigorously tested, hence may still have underlying bugs when tested on a different OS.
@@ -5,13 +6,16 @@ This script has not been rigorously tested, hence may still have underlying bugs
 Installation:
 Napari:
 https://napari.org/stable/tutorials/fundamentals/installation
-pip install scikit-image==0.22.0
+pip install scikit-image==0.22.0s
 pip install zarr==2.16.1
 pip install dask==2023.12.1
 pip install numpy==1.26.0
 pip install matplotlib==3.8.0
 pip install scipy==1.11.3
 pip install tqdm==4.66.1
+pip install jupyterlab
+pip install notebook
+python -m ipykernel install --user --name=napari-env # run this to add kernel to jupyter which is used generate the bboxes
 
 Functionality:
 - This script loads a zarr containing raw, neuron labels and mitochondria and visualises them in napari.
